@@ -1,13 +1,40 @@
 """
 Location Analysis Page - Child Nutrition Dashboard
-Geographic nutrition patterns and site performance analysis.
+Site-specific nutrition outcomes and performance analysis.
 """
 
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import sys
+import os
+
+# Add the parent directory to the path to import utils
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils.data_queries import (
+    get_available_sites,
+    get_site_rankings,
+    get_site_temporal_data,
+    get_site_category_data,
+    get_site_status_distribution,
+    get_z_score_comparison_data,
+    get_stunting_comparison_data,
+    get_measurement_volume_data
+)
+from utils.components import (
+    create_ranking_card,
+    create_site_temporal_chart,
+    create_site_status_distribution_chart,
+    create_z_score_comparison_chart,
+    create_stunting_comparison_chart,
+    create_measurement_volume_chart,
+    create_stunting_progress_chart,
+    add_ai_interpretation_button,
+    add_export_button,
+    create_loading_spinner
+)
 
 # Page configuration
 st.set_page_config(
@@ -21,216 +48,204 @@ def main():
     
     # Page header
     st.title("📍 Location Analysis")
-    st.markdown("### Geographic nutrition patterns and site performance")
+    st.markdown("### Deep dive into site-specific nutrition outcomes")
     st.markdown("---")
     
-    # Location overview section
-    st.subheader("🗺️ Geographic Overview")
+    # Initialize session state for selected location
+    if 'selected_location' not in st.session_state:
+        st.session_state.selected_location = None
     
-    # Create columns for location metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric(
-            label="Total Sites",
-            value="45",
-            delta="2",
-            delta_color="normal"
-        )
-    
-    with col2:
-        st.metric(
-            label="Active Regions",
-            value="8",
-            delta="0",
-            delta_color="normal"
-        )
-    
-    with col3:
-        st.metric(
-            label="Average Site Score",
-            value="7.8",
-            delta="0.3",
-            delta_color="normal"
-        )
-    
-    with col4:
-        st.metric(
-            label="Underperforming Sites",
-            value="5",
-            delta="-1",
-            delta_color="inverse"
-        )
-    
-    st.markdown("---")
-    
-    # Geographic analysis section
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("🗺️ Geographic Distribution")
+    try:
+        # Load available sites
+        with st.spinner("Loading available sites..."):
+            sites_df = get_available_sites()
         
-        # Placeholder for geographic map
-        st.info("""
-        **Coming Soon in Epic 2:**
-        - Interactive geographic map
-        - Site location visualization
-        - Regional performance heatmap
-        - Distance-based analysis
-        """)
+        if sites_df.empty:
+            st.error("No sites found in the database. Please check your data connection.")
+            return
         
-        # Sample placeholder map
-        st.plotly_chart(
-            create_placeholder_map(),
-            use_container_width=True
+        # Location selector
+        st.subheader("🏢 Select Location")
+        
+        # Create site options with child count
+        site_options = [f"{site} - {child_count:,} children" for site, child_count in 
+                       zip(sites_df['site'], sites_df['child_count'])]
+        
+        selected_option = st.selectbox(
+            "Choose a site to analyze:",
+            options=site_options,
+            index=0 if not st.session_state.selected_location else 
+                  next((i for i, option in enumerate(site_options) 
+                       if st.session_state.selected_location in option), 0),
+            key="location_selector"
         )
-    
-    with col2:
-        st.subheader("📊 Site Rankings")
         
-        # Placeholder for site rankings
-        st.info("""
-        **Coming Soon in Epic 2:**
-        - Top performing sites
-        - Site comparison metrics
-        - Performance rankings
-        - Improvement recommendations
-        """)
+        # Extract site name from selected option
+        selected_site = selected_option.split(" - ")[0]
         
-        # Sample placeholder chart
-        st.plotly_chart(
-            create_placeholder_chart("Site Performance", "Site", "Score"),
-            use_container_width=True
-        )
-    
-    st.markdown("---")
-    
-    # Site details section
-    st.subheader("📋 Site Details")
-    
-    # Placeholder for site details
-    st.info("""
-    **Coming Soon in Epic 2:**
-    - Individual site profiles
-    - Detailed performance metrics
-    - Historical data analysis
-    - Site-specific recommendations
-    """)
-    
-    # Sample site data table
-    st.subheader("🏢 Site Performance Summary")
-    
-    # Create sample data
-    site_data = {
-        'Site Name': ['Site A', 'Site B', 'Site C', 'Site D', 'Site E'],
-        'Region': ['North', 'South', 'East', 'West', 'Central'],
-        'Children Count': [156, 203, 134, 187, 145],
-        'Avg Nutrition Score': [8.2, 7.9, 8.5, 7.6, 8.1],
-        'Risk Cases': [3, 7, 2, 9, 4],
-        'Performance': ['Excellent', 'Good', 'Excellent', 'Fair', 'Good']
-    }
-    
-    df = pd.DataFrame(site_data)
-    st.dataframe(df, use_container_width=True)
-    
-    st.markdown("---")
-    
-    # Regional analysis section
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("🌍 Regional Analysis")
-        st.info("""
-        **Coming Soon in Epic 2:**
-        - Regional performance comparison
-        - Geographic nutrition patterns
-        - Regional risk factors
-        - Cross-regional insights
-        """)
-    
-    with col2:
-        st.subheader("📈 Trends by Location")
-        st.info("""
-        **Coming Soon in Epic 2:**
-        - Location-based trends
-        - Seasonal variations by region
-        - Geographic risk patterns
-        - Location-specific recommendations
-        """)
+        # Update session state if location changed
+        if st.session_state.selected_location != selected_site:
+            st.session_state.selected_location = selected_site
+            st.rerun()
+        
+        st.markdown("---")
+        
+        # Load site data
+        with st.spinner(f"Loading data for {selected_site}..."):
+            try:
+                # Get site rankings
+                site_rankings = get_site_rankings(selected_site)
+                
+                # Site summary card removed as requested
+                
+                # Performance ranking cards
+                st.subheader("📊 Performance Rankings")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    children_data = site_rankings['children_measured']
+                    create_ranking_card(
+                        title="Children Measured",
+                        value=f"{children_data['value']:,}",
+                        rank=children_data['rank'],
+                        total=children_data['total'],
+                        icon="👥",
+                        color="#4299E1"
+                    )
+                
+                with col2:
+                    zscore_data = site_rankings['avg_z_score']
+                    create_ranking_card(
+                        title="Average Z-Score",
+                        value=f"{zscore_data['value']:.2f}",
+                        rank=zscore_data['rank'],
+                        total=zscore_data['total'],
+                        icon="📈",
+                        color="#9F7AEA"
+                    )
+                
+                with col3:
+                    stunting_data = site_rankings['stunting_rate']
+                    create_ranking_card(
+                        title="Stunting Rate",
+                        value=f"{stunting_data['value']:.1f}%",
+                        rank=stunting_data['rank'],
+                        total=stunting_data['total'],
+                        icon="⚠️",
+                        color="#FC8181"
+                    )
+                
+                with col4:
+                    severe_stunting_data = site_rankings['severe_stunting_rate']
+                    create_ranking_card(
+                        title="Severe Stunting",
+                        value=f"{severe_stunting_data['value']:.1f}%",
+                        rank=severe_stunting_data['rank'],
+                        total=severe_stunting_data['total'],
+                        icon="🚨",
+                        color="#E53E3E"
+                    )
+                
+                st.markdown("---")
+                
+                # Site-specific charts
+                st.subheader("📈 Site-Specific Analysis")
+                
+                # Chart 1: Nutrition Outcomes Over Time
+                st.markdown("#### Chart 1: Nutrition Outcomes Over Time")
+                
+                temporal_data = get_site_temporal_data(selected_site)
+                temporal_chart = create_site_temporal_chart(temporal_data)
+                st.plotly_chart(temporal_chart, use_container_width=True)
+                
+                # AI interpretation button for Chart 1
+                add_ai_interpretation_button("temporal_chart", "Nutrition Outcomes Over Time")
+                add_export_button(temporal_chart, "nutrition_outcomes")
+                
+                st.markdown("---")
+                
+                # Chart 2: Number of Children by Category
+                st.markdown("#### Chart 2: Number of Children by Category")
+                
+                category_data = get_site_category_data(selected_site)
+                category_chart = create_stunting_progress_chart(category_data, "count")
+                st.plotly_chart(category_chart, use_container_width=True)
+                
+                # AI interpretation button for Chart 2
+                add_ai_interpretation_button("category_chart", "Children by Category")
+                add_export_button(category_chart, "children_by_category")
+                
+                st.markdown("---")
+                
+                # Chart 3: Current Status Distribution
+                st.markdown("#### Chart 3: Current Status Distribution")
+                
+                status_data = get_site_status_distribution(selected_site)
+                status_chart = create_site_status_distribution_chart(status_data)
+                st.plotly_chart(status_chart, use_container_width=True)
+                
+                # AI interpretation button for Chart 3
+                add_ai_interpretation_button("status_chart", "Status Distribution")
+                add_export_button(status_chart, "status_distribution")
+                
+                st.markdown("---")
+                
+                # Comparison charts
+                st.subheader("🔍 Cross-Site Comparison")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Chart 4: Z-Score Comparison
+                    st.markdown("#### Chart 4: Z-Score Comparison Across Locations")
+                    
+                    zscore_comparison_data = get_z_score_comparison_data(selected_site)
+                    zscore_comparison_chart = create_z_score_comparison_chart(zscore_comparison_data, selected_site)
+                    st.plotly_chart(zscore_comparison_chart, use_container_width=True)
+                    
+                    # AI interpretation button for Chart 4
+                    add_ai_interpretation_button("zscore_comparison", "Z-Score Comparison")
+                    add_export_button(zscore_comparison_chart, "zscore_comparison")
+                
+                with col2:
+                    # Chart 5: Stunting Rate Comparison
+                    st.markdown("#### Chart 5: Stunting Rate Comparison")
+                    
+                    stunting_comparison_data = get_stunting_comparison_data(selected_site)
+                    stunting_comparison_chart = create_stunting_comparison_chart(stunting_comparison_data, selected_site)
+                    st.plotly_chart(stunting_comparison_chart, use_container_width=True)
+                    
+                    # AI interpretation button for Chart 5
+                    add_ai_interpretation_button("stunting_comparison", "Stunting Rate Comparison")
+                    add_export_button(stunting_comparison_chart, "stunting_comparison")
+                
+                st.markdown("---")
+                
+                # Chart 6: Measurement Volume Over Time
+                st.markdown("#### Chart 6: Measurement Volume Over Time")
+                
+                volume_data = get_measurement_volume_data(selected_site)
+                volume_chart = create_measurement_volume_chart(volume_data)
+                st.plotly_chart(volume_chart, use_container_width=True)
+                
+                # AI interpretation button for Chart 6
+                add_ai_interpretation_button("volume_chart", "Measurement Volume")
+                add_export_button(volume_chart, "measurement_volume")
+                
+            except Exception as e:
+                st.error(f"Error loading data for {selected_site}: {str(e)}")
+                st.info("Please try selecting a different site or contact support if the issue persists.")
+                return
+        
+    except Exception as e:
+        st.error(f"Error loading location analysis data: {str(e)}")
+        st.info("Please check your database connection and try again.")
+        return
     
     # Footer
     st.markdown("---")
-    st.markdown("**Note:** This is a placeholder page. Full functionality will be implemented in Epic 2.")
-
-def create_placeholder_map():
-    """Create a placeholder map for demonstration purposes."""
-    
-    # Sample geographic data
-    import numpy as np
-    
-    # Create sample coordinates
-    lat = np.random.uniform(-30, -25, 20)
-    lon = np.random.uniform(25, 30, 20)
-    scores = np.random.uniform(6, 9, 20)
-    
-    fig = go.Figure()
-    
-    fig.add_trace(go.Scattermapbox(
-        lat=lat,
-        lon=lon,
-        mode='markers',
-        marker=dict(
-            size=scores * 3,
-            color=scores,
-            colorscale='Viridis',
-            showscale=True,
-            colorbar=dict(title="Nutrition Score")
-        ),
-        text=[f"Site {i+1}<br>Score: {score:.1f}" for i, score in enumerate(scores)],
-        hovertemplate="%{text}<extra></extra>"
-    ))
-    
-    fig.update_layout(
-        title="Site Locations and Performance",
-        mapbox=dict(
-            style="open-street-map",
-            center=dict(lat=-27.5, lon=27.5),
-            zoom=6
-        ),
-        height=400,
-        showlegend=False
-    )
-    
-    return fig
-
-def create_placeholder_chart(title: str, x_label: str, y_label: str):
-    """Create a placeholder chart for demonstration purposes."""
-    
-    # Sample data
-    import numpy as np
-    
-    x_data = [f"{x_label} {i+1}" for i in range(8)]
-    y_data = np.random.normal(7.5, 1, 8)
-    
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=x_data,
-        y=y_data,
-        name=title,
-        marker_color='#1f77b4'
-    ))
-    
-    fig.update_layout(
-        title=title,
-        xaxis_title=x_label,
-        yaxis_title=y_label,
-        height=400,
-        showlegend=False,
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)'
-    )
-    
-    return fig
+    st.markdown(f"**Last Updated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | **Selected Site:** {st.session_state.selected_location}")
 
 if __name__ == "__main__":
     main()

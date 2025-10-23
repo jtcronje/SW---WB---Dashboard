@@ -183,4 +183,4 @@ Thumbs.db
 *.tmp
 *.temp
 temp/
-tmp/
+tmp/child-nutrition-dashboard/.streamlit/secrets.toml
