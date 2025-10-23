@@ -1,6 +1,6 @@
 """
 Data Queries Module for Child Nutrition Dashboard
-Contains all SQL queries and data processing functions for the Overview page.
+Contains all SQL queries and data processing functions for the Overview, Location, and Child pages.
 """
 
 import pandas as pd
@@ -840,3 +840,482 @@ def get_measurement_volume_data(site: str) -> pd.DataFrame:
             
     except Exception as e:
         raise Exception(f"Failed to load measurement volume data for {site}: {str(e)}")
+
+# ============================================================================
+# CHILD ANALYSIS PAGE QUERIES
+# ============================================================================
+
+def get_available_children_for_site(site: str, search_term: str = "") -> List[Dict]:
+    """
+    Get available children for a selected site with optional search filtering.
+    
+    Args:
+        site: Selected site name
+        search_term: Optional search term for filtering by name or ID
+    
+    Returns:
+        List of dictionaries with child information
+    """
+    db = get_database()
+    
+    try:
+        if not db.test_connection():
+            raise Exception("Database connection test failed")
+        
+        # Build search condition
+        search_condition = ""
+        if search_term.strip():
+            search_condition = f"""
+                AND (
+                    LOWER(FIRST_NAMES) LIKE LOWER('%{search_term}%')
+                    OR LOWER(LAST_NAME) LIKE LOWER('%{search_term}%')
+                    OR CAST(BENEFICIARY_ID AS VARCHAR) LIKE '%{search_term}%'
+                )
+            """
+        
+        query = f"""
+        WITH child_summary AS (
+            SELECT 
+                BENEFICIARY_ID,
+                FIRST_NAMES,
+                LAST_NAME,
+                HOUSEHOLD,
+                SITE,
+                COUNT(*) as measurement_count,
+                MIN(CAPTURE_DATE) as first_measurement_date,
+                MAX(CAPTURE_DATE) as last_measurement_date,
+                ROUND(AVG(WHO_INDEX), 2) as avg_z_score
+            FROM CHILD_NUTRITION_DATA 
+            WHERE SITE = '{site}'
+                AND FLAGGED = 0 AND DUPLICATE = 'False'
+                {search_condition}
+            GROUP BY BENEFICIARY_ID, FIRST_NAMES, LAST_NAME, HOUSEHOLD, SITE
+        ),
+        latest_measurements AS (
+            SELECT 
+                BENEFICIARY_ID,
+                WHO_INDEX as latest_z_score,
+                ROW_NUMBER() OVER (PARTITION BY BENEFICIARY_ID ORDER BY CAPTURE_DATE DESC) as rn
+            FROM CHILD_NUTRITION_DATA 
+            WHERE SITE = '{site}'
+                AND FLAGGED = 0 AND DUPLICATE = 'False'
+                {search_condition}
+        )
+        SELECT 
+            cs.BENEFICIARY_ID,
+            cs.FIRST_NAMES,
+            cs.LAST_NAME,
+            cs.HOUSEHOLD,
+            cs.SITE,
+            cs.measurement_count,
+            cs.first_measurement_date,
+            cs.last_measurement_date,
+            cs.avg_z_score,
+            lm.latest_z_score
+        FROM child_summary cs
+        LEFT JOIN latest_measurements lm ON cs.BENEFICIARY_ID = lm.BENEFICIARY_ID AND lm.rn = 1
+        ORDER BY cs.FIRST_NAMES, cs.LAST_NAME
+        LIMIT 50
+        """
+        
+        df = db.execute_query(query)
+        
+        children = []
+        for _, row in df.iterrows():
+            # Format child name
+            first_name = row['FIRST_NAMES'] if pd.notna(row['FIRST_NAMES']) else ""
+            last_name = row['LAST_NAME'] if pd.notna(row['LAST_NAME']) else ""
+            full_name = f"{first_name} {last_name}".strip()
+            
+            children.append({
+                'beneficiary_id': row['BENEFICIARY_ID'],
+                'name': full_name,
+                'first_name': first_name,
+                'last_name': last_name,
+                'household': row['HOUSEHOLD'],
+                'site': row['SITE'],
+                'measurement_count': row['MEASUREMENT_COUNT'],
+                'first_measurement_date': row['FIRST_MEASUREMENT_DATE'],
+                'last_measurement_date': row['LAST_MEASUREMENT_DATE'],
+                'avg_z_score': row['AVG_Z_SCORE'],
+                'latest_z_score': row['LATEST_Z_SCORE']
+            })
+        
+        return children
+        
+    except Exception as e:
+        print(f"Error in get_available_children_for_site: {e}")
+        return []
+
+def get_child_profile_data(beneficiary_id: int) -> Dict:
+    """
+    Get comprehensive profile data for a specific child.
+    
+    Args:
+        beneficiary_id: Child's beneficiary ID
+    
+    Returns:
+        Dictionary with child profile information
+    """
+    db = get_database()
+    
+    try:
+        if not db.test_connection():
+            raise Exception("Database connection test failed")
+        
+        query = f"""
+        WITH child_summary AS (
+            SELECT 
+                BENEFICIARY_ID,
+                FIRST_NAMES,
+                LAST_NAME,
+                HOUSEHOLD,
+                SITE,
+                COUNT(*) as total_measurements,
+                MIN(CAPTURE_DATE) as first_measurement_date,
+                MAX(CAPTURE_DATE) as last_measurement_date,
+                ROUND(DATEDIFF(day, MIN(CAPTURE_DATE), MAX(CAPTURE_DATE)) / 365.25, 1) as age_years,
+                ROUND(AVG(WHO_INDEX), 2) as avg_z_score,
+                MAX(ANSWER) - MIN(ANSWER) as height_gain_cm
+            FROM CHILD_NUTRITION_DATA 
+            WHERE BENEFICIARY_ID = {beneficiary_id}
+                AND FLAGGED = 0 AND DUPLICATE = 'False'
+            GROUP BY BENEFICIARY_ID, FIRST_NAMES, LAST_NAME, HOUSEHOLD, SITE
+        ),
+        latest_measurement AS (
+            SELECT 
+                BENEFICIARY_ID,
+                WHO_INDEX as latest_z_score,
+                ANSWER as latest_height,
+                ROW_NUMBER() OVER (ORDER BY CAPTURE_DATE DESC) as rn
+            FROM CHILD_NUTRITION_DATA 
+            WHERE BENEFICIARY_ID = {beneficiary_id}
+                AND FLAGGED = 0 AND DUPLICATE = 'False'
+        )
+        SELECT 
+            cs.BENEFICIARY_ID,
+            cs.FIRST_NAMES,
+            cs.LAST_NAME,
+            cs.HOUSEHOLD,
+            cs.SITE,
+            cs.total_measurements,
+            cs.first_measurement_date,
+            cs.last_measurement_date,
+            cs.age_years,
+            cs.avg_z_score,
+            cs.height_gain_cm,
+            lm.latest_z_score,
+            lm.latest_height
+        FROM child_summary cs
+        LEFT JOIN latest_measurement lm ON cs.BENEFICIARY_ID = lm.BENEFICIARY_ID AND lm.rn = 1
+        """
+        
+        df = db.execute_query(query)
+        
+        if df.empty:
+            return {}
+        
+        row = df.iloc[0]
+        
+        # Format child name
+        first_name = row['FIRST_NAMES'] if pd.notna(row['FIRST_NAMES']) else ""
+        last_name = row['LAST_NAME'] if pd.notna(row['LAST_NAME']) else ""
+        full_name = f"{first_name} {last_name}".strip()
+        
+        return {
+            'beneficiary_id': row['BENEFICIARY_ID'],
+            'name': full_name,
+            'first_name': first_name,
+            'last_name': last_name,
+            'household': row['HOUSEHOLD'],
+            'site': row['SITE'],
+            'total_measurements': row['TOTAL_MEASUREMENTS'],
+            'first_measurement_date': row['FIRST_MEASUREMENT_DATE'],
+            'last_measurement_date': row['LAST_MEASUREMENT_DATE'],
+            'age_years': row['AGE_YEARS'],
+            'avg_z_score': row['AVG_Z_SCORE'],
+            'latest_z_score': row['LATEST_Z_SCORE'],
+            'latest_height': row['LATEST_HEIGHT'],
+            'height_gain_cm': row['HEIGHT_GAIN_CM']
+        }
+        
+    except Exception as e:
+        print(f"Error in get_child_profile_data: {e}")
+        return {}
+
+def get_child_progress_metrics(beneficiary_id: int) -> Dict:
+    """
+    Get progress metrics for a specific child.
+    
+    Args:
+        beneficiary_id: Child's beneficiary ID
+    
+    Returns:
+        Dictionary with progress metrics
+    """
+    db = get_database()
+    
+    try:
+        if not db.test_connection():
+            raise Exception("Database connection test failed")
+        
+        query = f"""
+        WITH child_summary AS (
+            SELECT 
+                MAX(ANSWER) - MIN(ANSWER) as height_gain_cm,
+                ROUND(AVG(WHO_INDEX), 2) as avg_z_score,
+                ROUND(DATEDIFF(month, MIN(CAPTURE_DATE), MAX(CAPTURE_DATE)), 1) as monitoring_months
+            FROM CHILD_NUTRITION_DATA 
+            WHERE BENEFICIARY_ID = {beneficiary_id}
+                AND FLAGGED = 0 AND DUPLICATE = 'False'
+        ),
+        first_last_measurements AS (
+            SELECT 
+                FIRST_VALUE(WHO_INDEX) OVER (ORDER BY CAPTURE_DATE) as first_z_score,
+                FIRST_VALUE(WHO_INDEX) OVER (ORDER BY CAPTURE_DATE DESC) as last_z_score,
+                FIRST_VALUE(ANSWER) OVER (ORDER BY CAPTURE_DATE) as first_height,
+                FIRST_VALUE(ANSWER) OVER (ORDER BY CAPTURE_DATE DESC) as last_height,
+                ROW_NUMBER() OVER (ORDER BY CAPTURE_DATE) as first_rn,
+                ROW_NUMBER() OVER (ORDER BY CAPTURE_DATE DESC) as last_rn
+            FROM CHILD_NUTRITION_DATA 
+            WHERE BENEFICIARY_ID = {beneficiary_id}
+                AND FLAGGED = 0 AND DUPLICATE = 'False'
+        )
+        SELECT 
+            cs.height_gain_cm,
+            cs.avg_z_score,
+            cs.monitoring_months,
+            flm.first_z_score,
+            flm.last_z_score,
+            flm.first_height,
+            flm.last_height,
+            flm.last_z_score - flm.first_z_score as z_score_improvement,
+            CASE 
+                WHEN flm.first_z_score >= -1 THEN 'Normal'
+                WHEN flm.first_z_score BETWEEN -2 AND -1 THEN 'At Risk'
+                WHEN flm.first_z_score BETWEEN -3 AND -2 THEN 'Stunted'
+                ELSE 'Severely Stunted'
+            END as first_status,
+            CASE 
+                WHEN flm.last_z_score >= -1 THEN 'Normal'
+                WHEN flm.last_z_score BETWEEN -2 AND -1 THEN 'At Risk'
+                WHEN flm.last_z_score BETWEEN -3 AND -2 THEN 'Stunted'
+                ELSE 'Severely Stunted'
+            END as last_status
+        FROM child_summary cs
+        CROSS JOIN (
+            SELECT 
+                MAX(CASE WHEN first_rn = 1 THEN first_z_score END) as first_z_score,
+                MAX(CASE WHEN last_rn = 1 THEN last_z_score END) as last_z_score,
+                MAX(CASE WHEN first_rn = 1 THEN first_height END) as first_height,
+                MAX(CASE WHEN last_rn = 1 THEN last_height END) as last_height
+            FROM first_last_measurements
+        ) flm
+        """
+        
+        df = db.execute_query(query)
+        
+        if df.empty:
+            return {}
+        
+        row = df.iloc[0]
+        
+        # Determine alert type based on status changes
+        first_status = row['FIRST_STATUS']
+        last_status = row['LAST_STATUS']
+        
+        if first_status != 'Normal' and last_status == 'Normal':
+            alert_type = 'SUCCESS'
+        elif first_status == 'Stunted' and last_status == 'At Risk':
+            alert_type = 'WARNING'
+        elif last_status in ['Stunted', 'Severely Stunted']:
+            alert_type = 'INFO'
+        else:
+            alert_type = 'NORMAL'
+        
+        return {
+            'height_gain_cm': row['HEIGHT_GAIN_CM'],
+            'z_score_improvement': row['Z_SCORE_IMPROVEMENT'],
+            'avg_z_score': row['AVG_Z_SCORE'],
+            'monitoring_months': row['MONITORING_MONTHS'],
+            'first_z_score': row['FIRST_Z_SCORE'],
+            'last_z_score': row['LAST_Z_SCORE'],
+            'first_height': row['FIRST_HEIGHT'],
+            'last_height': row['LAST_HEIGHT'],
+            'first_status': first_status,
+            'last_status': last_status,
+            'alert_type': alert_type
+        }
+        
+    except Exception as e:
+        print(f"Error in get_child_progress_metrics: {e}")
+        return {}
+
+def get_child_growth_trajectory(beneficiary_id: int) -> List[Dict]:
+    """
+    Get height growth trajectory data for a specific child.
+    
+    Args:
+        beneficiary_id: Child's beneficiary ID
+    
+    Returns:
+        List of dictionaries with measurement data over time
+    """
+    db = get_database()
+    
+    try:
+        if not db.test_connection():
+            raise Exception("Database connection test failed")
+        
+        query = f"""
+        SELECT 
+            CAPTURE_DATE,
+            ANSWER as height_cm,
+            WHO_INDEX,
+            ROUND(DATEDIFF(day, 
+                (SELECT MIN(CAPTURE_DATE) FROM CHILD_NUTRITION_DATA WHERE BENEFICIARY_ID = {beneficiary_id}), 
+                CAPTURE_DATE) / 365.25, 1) as age_years
+        FROM CHILD_NUTRITION_DATA 
+        WHERE BENEFICIARY_ID = {beneficiary_id}
+            AND FLAGGED = 0 AND DUPLICATE = 'False'
+        ORDER BY CAPTURE_DATE
+        """
+        
+        df = db.execute_query(query)
+        
+        trajectory = []
+        for _, row in df.iterrows():
+            trajectory.append({
+                'date': row['CAPTURE_DATE'],
+                'height_cm': row['HEIGHT_CM'],
+                'z_score': row['WHO_INDEX'],
+                'age_years': row['AGE_YEARS']
+            })
+        
+        return trajectory
+        
+    except Exception as e:
+        print(f"Error in get_child_growth_trajectory: {e}")
+        return []
+
+def get_child_z_score_progression(beneficiary_id: int) -> List[Dict]:
+    """
+    Get z-score progression data for a specific child.
+    
+    Args:
+        beneficiary_id: Child's beneficiary ID
+    
+    Returns:
+        List of dictionaries with z-score data over time
+    """
+    db = get_database()
+    
+    try:
+        if not db.test_connection():
+            raise Exception("Database connection test failed")
+        
+        query = f"""
+        SELECT 
+            CAPTURE_DATE,
+            WHO_INDEX,
+            ROUND(DATEDIFF(day, 
+                (SELECT MIN(CAPTURE_DATE) FROM CHILD_NUTRITION_DATA WHERE BENEFICIARY_ID = {beneficiary_id}), 
+                CAPTURE_DATE) / 365.25, 1) as age_years
+        FROM CHILD_NUTRITION_DATA 
+        WHERE BENEFICIARY_ID = {beneficiary_id}
+            AND FLAGGED = 0 AND DUPLICATE = 'False'
+        ORDER BY CAPTURE_DATE
+        """
+        
+        df = db.execute_query(query)
+        
+        progression = []
+        for _, row in df.iterrows():
+            progression.append({
+                'date': row['CAPTURE_DATE'],
+                'z_score': row['WHO_INDEX'],
+                'age_years': row['AGE_YEARS']
+            })
+        
+        return progression
+        
+    except Exception as e:
+        print(f"Error in get_child_z_score_progression: {e}")
+        return []
+
+def get_child_measurement_history(beneficiary_id: int) -> List[Dict]:
+    """
+    Get detailed measurement history for a specific child.
+    
+    Args:
+        beneficiary_id: Child's beneficiary ID
+    
+    Returns:
+        List of dictionaries with measurement history
+    """
+    db = get_database()
+    
+    try:
+        if not db.test_connection():
+            raise Exception("Database connection test failed")
+        
+        query = f"""
+        WITH measurements_with_change AS (
+            SELECT 
+                CAPTURE_DATE,
+                ANSWER as height_cm,
+                WHO_INDEX,
+                ROUND(DATEDIFF(day, 
+                    (SELECT MIN(CAPTURE_DATE) FROM CHILD_NUTRITION_DATA WHERE BENEFICIARY_ID = {beneficiary_id}), 
+                    CAPTURE_DATE) / 365.25, 1) as age_years,
+                LAG(ANSWER) OVER (ORDER BY CAPTURE_DATE) as prev_height,
+                LAG(WHO_INDEX) OVER (ORDER BY CAPTURE_DATE) as prev_z_score,
+                ROW_NUMBER() OVER (ORDER BY CAPTURE_DATE) as row_num
+            FROM CHILD_NUTRITION_DATA 
+            WHERE BENEFICIARY_ID = {beneficiary_id}
+                AND FLAGGED = 0 AND DUPLICATE = 'False'
+        )
+        SELECT 
+            TO_CHAR(CAPTURE_DATE, 'YYYY-MM-DD') as date,
+            age_years,
+            height_cm,
+            ROUND(WHO_INDEX, 2) as z_score,
+            CASE 
+                WHEN WHO_INDEX >= -1 THEN 'Normal'
+                WHEN WHO_INDEX BETWEEN -2 AND -1 THEN 'At Risk'
+                WHEN WHO_INDEX BETWEEN -3 AND -2 THEN 'Stunted'
+                WHEN WHO_INDEX < -3 THEN 'Severely Stunted'
+            END as status,
+            CASE 
+                WHEN row_num = 1 THEN 'First measurement'
+                ELSE CONCAT(
+                    CASE WHEN height_cm >= prev_height THEN '+' ELSE '' END,
+                    ROUND(height_cm - prev_height, 1), 
+                    ' cm | ',
+                    CASE WHEN WHO_INDEX >= prev_z_score THEN '+' ELSE '' END,
+                    ROUND(WHO_INDEX - prev_z_score, 2),
+                    ' z'
+                )
+            END as change
+        FROM measurements_with_change
+        ORDER BY CAPTURE_DATE
+        """
+        
+        df = db.execute_query(query)
+        
+        history = []
+        for _, row in df.iterrows():
+            history.append({
+                'date': row['DATE'],
+                'age_years': row['AGE_YEARS'],
+                'height_cm': row['HEIGHT_CM'],
+                'z_score': row['Z_SCORE'],
+                'status': row['STATUS'],
+                'change': row['CHANGE']
+            })
+        
+        return history
+        
+    except Exception as e:
+        print(f"Error in get_child_measurement_history: {e}")
+        return []

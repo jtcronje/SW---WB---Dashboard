@@ -5,9 +5,28 @@ Individual child nutrition tracking and insights.
 
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import time
+
+# Import utility modules
+from utils.data_queries import (
+    get_available_sites, 
+    get_available_children_for_site,
+    get_child_profile_data,
+    get_child_progress_metrics,
+    get_child_growth_trajectory,
+    get_child_z_score_progression,
+    get_child_measurement_history
+)
+from utils.components import (
+    create_child_profile_card,
+    create_progress_metric_card,
+    create_alert_banner,
+    create_growth_trajectory_chart,
+    create_z_score_progression_chart,
+    create_measurement_history_table
+)
 
 # Page configuration
 st.set_page_config(
@@ -24,206 +43,205 @@ def main():
     st.markdown("### Individual child nutrition tracking and insights")
     st.markdown("---")
     
-    # Search and filter section
-    st.subheader("🔍 Child Search & Filter")
+    # Initialize session state
+    if 'selected_site' not in st.session_state:
+        st.session_state.selected_site = None
+    if 'selected_child' not in st.session_state:
+        st.session_state.selected_child = None
+    if 'search_term' not in st.session_state:
+        st.session_state.search_term = ""
     
-    # Create search interface
-    col1, col2, col3 = st.columns(3)
+    # Story 3.1: Child Selection & Profile
+    st.subheader("🔍 Child Selection & Profile")
     
-    with col1:
-        search_term = st.text_input("Search by Name or ID", placeholder="Enter child name or ID...")
-    
-    with col2:
-        site_filter = st.selectbox("Filter by Site", ["All Sites", "Site A", "Site B", "Site C", "Site D", "Site E"])
-    
-    with col3:
-        risk_filter = st.selectbox("Filter by Risk Level", ["All", "Low Risk", "Medium Risk", "High Risk"])
-    
-    # Search button
-    if st.button("🔍 Search Children", type="primary"):
-        st.info("**Coming Soon in Epic 3:** Advanced search and filtering functionality")
-    
-    st.markdown("---")
-    
-    # Child metrics section
-    st.subheader("📊 Child Metrics Overview")
-    
-    # Create columns for child metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric(
-            label="Total Children",
-            value="1,234",
-            delta="45",
-            delta_color="normal"
-        )
-    
-    with col2:
-        st.metric(
-            label="New This Month",
-            value="89",
-            delta="12%",
-            delta_color="normal"
-        )
-    
-    with col3:
-        st.metric(
-            label="At Risk",
-            value="23",
-            delta="-3",
-            delta_color="inverse"
-        )
-    
-    with col4:
-        st.metric(
-            label="Improved Nutrition",
-            value="156",
-            delta="8%",
-            delta_color="normal"
-        )
-    
-    st.markdown("---")
-    
-    # Child profiles section
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("👤 Individual Child Profiles")
+    # Get available sites
+    try:
+        sites_data = get_available_sites()
+        site_options = ["Select a site..."] + sites_data['site'].tolist()
         
-        # Placeholder for child profiles
-        st.info("""
-        **Coming Soon in Epic 3:**
-        - Detailed child profiles
-        - Nutrition history tracking
-        - Growth charts and trends
-        - Individual risk assessments
-        """)
+        col1, col2 = st.columns([1, 1])
         
-        # Sample child profile
-        st.subheader("Sample Child Profile")
-        child_data = {
-            'Name': 'John Doe',
-            'Age': '5 years',
-            'Site': 'Site A',
-            'Nutrition Score': '8.2',
-            'Risk Level': 'Low',
-            'Last Assessment': '2024-01-15'
-        }
+        with col1:
+            selected_site = st.selectbox(
+                "📍 Select Location",
+                options=site_options,
+                index=0 if st.session_state.selected_site is None else site_options.index(st.session_state.selected_site) if st.session_state.selected_site in site_options else 0,
+                key="site_selector"
+            )
+            
+            if selected_site != "Select a site...":
+                st.session_state.selected_site = selected_site
         
-        for key, value in child_data.items():
-            st.write(f"**{key}:** {value}")
-    
-    with col2:
-        st.subheader("📈 Nutrition Trends")
+        with col2:
+            search_term = st.text_input(
+                "🔍 Search by Name or ID",
+                value=st.session_state.search_term,
+                placeholder="Enter child name or ID...",
+                key="search_input"
+            )
+            st.session_state.search_term = search_term
         
-        # Placeholder for nutrition trends
-        st.info("""
-        **Coming Soon in Epic 3:**
-        - Individual nutrition trends
-        - Growth trajectory analysis
-        - Risk progression tracking
-        - Improvement recommendations
-        """)
-        
-        # Sample trend chart
-        st.plotly_chart(
-            create_placeholder_chart("Nutrition Score Over Time", "Date", "Score"),
-            use_container_width=True
-        )
+        # Get children for selected site
+        if st.session_state.selected_site and st.session_state.selected_site != "Select a site...":
+            with st.spinner("Loading children..."):
+                children_data = get_available_children_for_site(
+                    st.session_state.selected_site, 
+                    st.session_state.search_term
+                )
+            
+            if children_data:
+                # Create child options
+                child_options = ["Select a child..."] + [
+                    f"{child['name']} (ID: {child['beneficiary_id']})" 
+                    for child in children_data
+                ]
+                
+                selected_child_option = st.selectbox(
+                    "👶 Select Child",
+                    options=child_options,
+                    index=0 if st.session_state.selected_child is None else 0,  # Reset selection
+                    key="child_selector"
+                )
+                
+                if selected_child_option != "Select a child...":
+                    # Extract beneficiary ID from selection
+                    child_id = int(selected_child_option.split("ID: ")[1].split(")")[0])
+                    st.session_state.selected_child = child_id
+                    
+                    # Load child profile data
+                    with st.spinner("Loading child profile..."):
+                        child_profile = get_child_profile_data(child_id)
+                        progress_metrics = get_child_progress_metrics(child_id)
+                    
+                    if child_profile:
+                        # Display child profile card
+                        create_child_profile_card(child_profile)
+                        
+                        # Story 3.2: Progress Metrics & Charts
+                        st.markdown("---")
+                        st.subheader("📊 Progress Metrics & Charts")
+                        
+                        if progress_metrics:
+                            # Display alert banners based on status changes
+                            alert_type = progress_metrics.get('alert_type', 'NORMAL')
+                            if alert_type == 'SUCCESS':
+                                create_alert_banner(
+                                    'SUCCESS',
+                                    'Excellent Progress!',
+                                    f"Child has improved from {progress_metrics.get('first_status', 'Unknown')} to {progress_metrics.get('last_status', 'Unknown')}"
+                                )
+                            elif alert_type == 'WARNING':
+                                create_alert_banner(
+                                    'WARNING',
+                                    'Improving but Still at Risk',
+                                    f"Child has improved from {progress_metrics.get('first_status', 'Unknown')} to {progress_metrics.get('last_status', 'Unknown')} but requires continued monitoring"
+                                )
+                            elif alert_type == 'INFO':
+                                create_alert_banner(
+                                    'INFO',
+                                    'Requires Continued Monitoring',
+                                    f"Child remains {progress_metrics.get('last_status', 'Unknown')} and needs ongoing support"
+                                )
+                        
+                        # Progress metric cards
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            create_progress_metric_card(
+                                "Height Gain",
+                                f"{progress_metrics.get('height_gain_cm', 0):.1f} cm",
+                                "Total growth during monitoring",
+                                "📏",
+                                "#4299E1"
+                            )
+                        
+                        with col2:
+                            create_progress_metric_card(
+                                "Z-Score Improvement",
+                                f"{progress_metrics.get('z_score_improvement', 0):+.2f}",
+                                "Change in WHO z-score",
+                                "📈",
+                                "#68D391" if progress_metrics.get('z_score_improvement', 0) > 0 else "#FC8181"
+                            )
+                        
+                        with col3:
+                            create_progress_metric_card(
+                                "Average Z-Score",
+                                f"{progress_metrics.get('avg_z_score', 0):.2f}",
+                                "Overall nutrition status",
+                                "📊",
+                                "#9F7AEA"
+                            )
+                        
+                        with col4:
+                            create_progress_metric_card(
+                                "Monitoring Period",
+                                f"{progress_metrics.get('monitoring_months', 0):.1f} months",
+                                "Time under observation",
+                                "⏱️",
+                                "#F6AD55"
+                            )
+                        
+                        # Charts section
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("#### 📈 Height Growth Trajectory")
+                            growth_data = get_child_growth_trajectory(child_id)
+                            if growth_data:
+                                growth_chart = create_growth_trajectory_chart(growth_data)
+                                st.plotly_chart(growth_chart, use_container_width=True)
+                                
+                                # AI interpretation button placeholder
+                                if st.button("🧠 AI Interpretation", key="ai_growth"):
+                                    st.info("AI interpretation functionality will be available in Epic 4")
+                            else:
+                                st.warning("No growth trajectory data available")
+                        
+                        with col2:
+                            st.markdown("#### 📊 Z-Score Progression")
+                            zscore_data = get_child_z_score_progression(child_id)
+                            if zscore_data:
+                                zscore_chart = create_z_score_progression_chart(zscore_data)
+                                st.plotly_chart(zscore_chart, use_container_width=True)
+                                
+                                # AI interpretation button placeholder
+                                if st.button("🧠 AI Interpretation", key="ai_zscore"):
+                                    st.info("AI interpretation functionality will be available in Epic 4")
+                            else:
+                                st.warning("No z-score progression data available")
+                        
+                        # Story 3.3: Measurement History & AI Summary
+                        st.markdown("---")
+                        st.subheader("📋 Measurement History & AI Summary")
+                        
+                        measurement_history = get_child_measurement_history(child_id)
+                        if measurement_history:
+                            create_measurement_history_table(measurement_history)
+                            
+                            # AI Summary button placeholder
+                            col1, col2, col3 = st.columns([1, 1, 1])
+                            with col2:
+                                if st.button("🧠 Generate AI Progress Summary", type="primary", key="ai_summary"):
+                                    st.info("AI progress summary functionality will be available in Epic 4")
+                        else:
+                            st.warning("No measurement history available")
+                    
+                    else:
+                        st.error("Error loading child profile data")
+                else:
+                    st.info("Please select a child to view their profile and progress")
+            else:
+                st.warning(f"No children found for site '{st.session_state.selected_site}' with search term '{st.session_state.search_term}'")
+        else:
+            st.info("Please select a site to view available children")
     
-    st.markdown("---")
-    
-    # AI insights section
-    st.subheader("🧠 AI-Powered Nutrition Insights")
-    
-    # Placeholder for AI insights
-    st.info("""
-    **Coming Soon in Epic 4:**
-    - AI-powered nutrition recommendations
-    - Predictive risk assessment
-    - Personalized improvement plans
-    - Automated insights and alerts
-    """)
-    
-    # Sample insights
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("🎯 Key Insights")
-        st.success("""
-        **Sample Insight:**
-        Children in Site A show 15% improvement in nutrition scores over the last 3 months.
-        """)
-        
-        st.warning("""
-        **Risk Alert:**
-        3 children in Site B require immediate attention due to declining nutrition scores.
-        """)
-    
-    with col2:
-        st.subheader("📋 Recommendations")
-        st.info("""
-        **Sample Recommendations:**
-        - Focus on protein-rich nutrition for children in Site C
-        - Implement weekly monitoring for high-risk cases
-        - Consider additional support for families in Site D
-        """)
-    
-    st.markdown("---")
-    
-    # Child data table
-    st.subheader("📊 Child Data Summary")
-    
-    # Create sample child data
-    child_data = {
-        'Child ID': ['C001', 'C002', 'C003', 'C004', 'C005'],
-        'Name': ['John Doe', 'Jane Smith', 'Mike Johnson', 'Sarah Wilson', 'Tom Brown'],
-        'Age': ['5', '4', '6', '5', '4'],
-        'Site': ['Site A', 'Site B', 'Site A', 'Site C', 'Site B'],
-        'Nutrition Score': [8.2, 7.5, 8.8, 7.1, 8.0],
-        'Risk Level': ['Low', 'Medium', 'Low', 'High', 'Low'],
-        'Last Assessment': ['2024-01-15', '2024-01-14', '2024-01-16', '2024-01-13', '2024-01-15']
-    }
-    
-    df = pd.DataFrame(child_data)
-    st.dataframe(df, use_container_width=True)
+    except Exception as e:
+        st.error(f"Error loading data: {str(e)}")
+        st.info("Please check your database connection and try again")
     
     # Footer
     st.markdown("---")
-    st.markdown("**Note:** This is a placeholder page. Full functionality will be implemented in Epic 3.")
-
-def create_placeholder_chart(title: str, x_label: str, y_label: str):
-    """Create a placeholder chart for demonstration purposes."""
-    
-    # Sample data
-    import numpy as np
-    
-    # Create sample time series data
-    dates = pd.date_range(start='2023-10-01', end='2024-01-15', freq='M')
-    scores = np.random.normal(8, 0.5, len(dates))
-    
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=dates,
-        y=scores,
-        mode='lines+markers',
-        name='Nutrition Score',
-        line=dict(color='#1f77b4', width=3),
-        marker=dict(size=8)
-    ))
-    
-    fig.update_layout(
-        title=title,
-        xaxis_title=x_label,
-        yaxis_title=y_label,
-        height=400,
-        showlegend=False,
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)'
-    )
-    
-    return fig
 
 if __name__ == "__main__":
     main()

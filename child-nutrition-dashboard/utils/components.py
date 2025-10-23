@@ -950,3 +950,411 @@ def create_measurement_volume_chart(data: pd.DataFrame) -> go.Figure:
     )
     
     return fig
+
+# ============================================================================
+# CHILD ANALYSIS PAGE COMPONENTS
+# ============================================================================
+
+def create_child_profile_card(child_data: Dict) -> None:
+    """
+    Create a child profile hero card with gradient background.
+    
+    Args:
+        child_data: Dictionary with child profile information
+    """
+    try:
+        if not child_data:
+            st.warning("No child data available")
+            return
+        
+        # Create gradient hero card
+        st.markdown(f"""
+        <div style="
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 2rem;
+            border-radius: 12px;
+            color: white;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        ">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h2 style="margin: 0; font-size: 1.8rem; font-weight: 600;">
+                        {child_data.get('name', 'Unknown Child')}
+                    </h2>
+                    <p style="margin: 0.5rem 0; opacity: 0.9; font-size: 1.1rem;">
+                        ID: {child_data.get('beneficiary_id', 'N/A')} • Age: {child_data.get('age_years', 'N/A')} years
+                    </p>
+                    <p style="margin: 0; opacity: 0.8;">
+                        {child_data.get('household', 'N/A')} • {child_data.get('site', 'N/A')}
+                    </p>
+                </div>
+                <div style="text-align: right;">
+                    <div style="
+                        background: rgba(255, 255, 255, 0.2);
+                        padding: 1rem;
+                        border-radius: 8px;
+                        backdrop-filter: blur(10px);
+                    ">
+                        <div style="font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem;">
+                            {child_data.get('latest_z_score', 0):.2f}
+                        </div>
+                        <div style="font-size: 0.9rem; opacity: 0.9;">
+                            Latest Z-Score
+                        </div>
+                        <div style="margin-top: 0.5rem;">
+                            {create_status_badge_html(child_data.get('latest_z_score', 0))}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div style="
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 1rem;
+                margin-top: 1.5rem;
+            ">
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: 600;">
+                        {child_data.get('total_measurements', 0)}
+                    </div>
+                    <div style="font-size: 0.9rem; opacity: 0.8;">
+                        Total Measurements
+                    </div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: 600;">
+                        {child_data.get('height_gain_cm', 0):.1f} cm
+                    </div>
+                    <div style="font-size: 0.9rem; opacity: 0.8;">
+                        Height Gain
+                    </div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 1.5rem; font-weight: 600;">
+                        {child_data.get('avg_z_score', 0):.2f}
+                    </div>
+                    <div style="font-size: 0.9rem; opacity: 0.8;">
+                        Average Z-Score
+                    </div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    except Exception as e:
+        print(f"Error in create_child_profile_card: {e}")
+        st.error("Error creating child profile card")
+
+def create_status_badge_html(z_score: float) -> str:
+    """
+    Create HTML for status badge based on z-score.
+    
+    Args:
+        z_score: WHO z-score value
+    
+    Returns:
+        HTML string for status badge
+    """
+    if z_score >= -1:
+        return '<span style="background: #C6F6D5; color: #22543D; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 500;">Normal</span>'
+    elif z_score >= -2:
+        return '<span style="background: #FEEBC8; color: #7C2D12; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 500;">At Risk</span>'
+    elif z_score >= -3:
+        return '<span style="background: #FED7D7; color: #742A2A; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 500;">Stunted</span>'
+    else:
+        return '<span style="background: #FED7D7; color: #742A2A; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 500;">Severely Stunted</span>'
+
+def create_progress_metric_card(title: str, value: str, subtitle: str, icon: str, color: str) -> None:
+    """
+    Create a progress metric card for child analysis.
+    
+    Args:
+        title: Card title
+        value: Main metric value
+        subtitle: Subtitle text
+        icon: Icon emoji
+        color: Card accent color
+    """
+    try:
+        st.markdown(f"""
+        <div style="
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            border-left: 4px solid {color};
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin-bottom: 1rem;
+        ">
+            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span style="font-size: 1.5rem; margin-right: 0.5rem;">{icon}</span>
+                <h4 style="margin: 0; color: #2D3748; font-weight: 600;">{title}</h4>
+            </div>
+            <div style="font-size: 2rem; font-weight: 700; color: {color}; margin-bottom: 0.5rem;">
+                {value}
+            </div>
+            <div style="color: #718096; font-size: 0.9rem;">
+                {subtitle}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    except Exception as e:
+        print(f"Error in create_progress_metric_card: {e}")
+        st.error("Error creating progress metric card")
+
+def create_alert_banner(alert_type: str, title: str, message: str) -> None:
+    """
+    Create an alert banner based on child's progress status.
+    
+    Args:
+        alert_type: Type of alert (SUCCESS, WARNING, INFO, NORMAL)
+        title: Alert title
+        message: Alert message
+    """
+    try:
+        if alert_type == 'NORMAL':
+            return
+        
+        # Define alert styles
+        alert_styles = {
+            'SUCCESS': {
+                'bg_color': '#C6F6D5',
+                'border_color': '#9AE6B4',
+                'text_color': '#22543D',
+                'icon': '✅'
+            },
+            'WARNING': {
+                'bg_color': '#FEEBC8',
+                'border_color': '#F6AD55',
+                'text_color': '#7C2D12',
+                'icon': '⚠️'
+            },
+            'INFO': {
+                'bg_color': '#BEE3F8',
+                'border_color': '#4299E1',
+                'text_color': '#2C5282',
+                'icon': 'ℹ️'
+            }
+        }
+        
+        style = alert_styles.get(alert_type, alert_styles['INFO'])
+        
+        st.markdown(f"""
+        <div style="
+            background: {style['bg_color']};
+            border: 1px solid {style['border_color']};
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1rem 0;
+            color: {style['text_color']};
+        ">
+            <div style="display: flex; align-items: center;">
+                <span style="font-size: 1.2rem; margin-right: 0.5rem;">{style['icon']}</span>
+                <div>
+                    <strong>{title}</strong>
+                    <div style="margin-top: 0.25rem; font-size: 0.9rem;">
+                        {message}
+                    </div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    except Exception as e:
+        print(f"Error in create_alert_banner: {e}")
+        st.error("Error creating alert banner")
+
+def create_growth_trajectory_chart(data: List[Dict]) -> go.Figure:
+    """
+    Create height growth trajectory chart for a specific child.
+    
+    Args:
+        data: List of measurement data over time
+    
+    Returns:
+        Plotly figure object
+    """
+    try:
+        if not data:
+            return create_empty_chart("Height Growth Trajectory", "No data available")
+        
+        # Convert data to DataFrame
+        df = pd.DataFrame(data)
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # Create figure
+        fig = go.Figure()
+        
+        # Add height line
+        fig.add_trace(go.Scatter(
+            x=df['date'],
+            y=df['height_cm'],
+            mode='lines+markers',
+            name='Height (cm)',
+            line=dict(color=COLORS['primary'], width=3),
+            marker=dict(size=8, color=COLORS['primary']),
+            hovertemplate='<b>Date:</b> %{x}<br><b>Height:</b> %{y:.1f} cm<br><b>Age:</b> %{customdata:.1f} years<extra></extra>',
+            customdata=df['age_years']
+        ))
+        
+        # Add trend line
+        if len(df) > 1:
+            z = np.polyfit(range(len(df)), df['height_cm'], 1)
+            p = np.poly1d(z)
+            fig.add_trace(go.Scatter(
+                x=df['date'],
+                y=p(range(len(df))),
+                mode='lines',
+                name='Trend',
+                line=dict(color=COLORS['secondary'], width=2, dash='dash'),
+                opacity=0.7
+            ))
+        
+        # Update layout
+        fig.update_layout(
+            title={
+                'text': 'Height Growth Trajectory',
+                'x': 0.5,
+                'xanchor': 'center',
+                'font': {'size': 18, 'color': COLORS['text']}
+            },
+            xaxis_title='Date',
+            yaxis_title='Height (cm)',
+            height=400,
+            showlegend=True,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        return fig
+        
+    except Exception as e:
+        print(f"Error in create_growth_trajectory_chart: {e}")
+        return create_empty_chart("Height Growth Trajectory", "Error loading chart")
+
+def create_z_score_progression_chart(data: List[Dict]) -> go.Figure:
+    """
+    Create z-score progression chart with WHO reference lines.
+    
+    Args:
+        data: List of z-score data over time
+    
+    Returns:
+        Plotly figure object
+    """
+    try:
+        if not data:
+            return create_empty_chart("Z-Score Progression", "No data available")
+        
+        # Convert data to DataFrame
+        df = pd.DataFrame(data)
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # Create figure
+        fig = go.Figure()
+        
+        # Add z-score area
+        fig.add_trace(go.Scatter(
+            x=df['date'],
+            y=df['z_score'],
+            mode='lines',
+            name='Z-Score',
+            line=dict(color=COLORS['primary'], width=3),
+            fill='tonexty',
+            fillcolor=f"rgba(66, 153, 225, 0.3)",
+            hovertemplate='<b>Date:</b> %{x}<br><b>Z-Score:</b> %{y:.2f}<br><b>Age:</b> %{customdata:.1f} years<extra></extra>',
+            customdata=df['age_years']
+        ))
+        
+        # Add WHO reference lines
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", 
+                     annotation_text="WHO Median", annotation_position="bottom right")
+        fig.add_hline(y=-1, line_dash="dash", line_color=COLORS['atRisk'], 
+                     annotation_text="At Risk (-1)", annotation_position="bottom right")
+        fig.add_hline(y=-2, line_dash="dash", line_color=COLORS['stunted'], 
+                     annotation_text="Stunted (-2)", annotation_position="bottom right")
+        fig.add_hline(y=-3, line_dash="dash", line_color=COLORS['severelyStunted'], 
+                     annotation_text="Severely Stunted (-3)", annotation_position="bottom right")
+        
+        # Update layout
+        fig.update_layout(
+            title={
+                'text': 'Z-Score Progression with WHO Reference Lines',
+                'x': 0.5,
+                'xanchor': 'center',
+                'font': {'size': 18, 'color': COLORS['text']}
+            },
+            xaxis_title='Date',
+            yaxis_title='WHO Z-Score',
+            height=400,
+            showlegend=True,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
+        )
+        
+        return fig
+        
+    except Exception as e:
+        print(f"Error in create_z_score_progression_chart: {e}")
+        return create_empty_chart("Z-Score Progression", "Error loading chart")
+
+def create_measurement_history_table(data: List[Dict]) -> None:
+    """
+    Create a styled measurement history table.
+    
+    Args:
+        data: List of measurement history data
+    """
+    try:
+        if not data:
+            st.warning("No measurement history available")
+            return
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(data)
+        
+        # Style the DataFrame
+        st.markdown("### 📋 Measurement History")
+        
+        # Create styled table
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "date": st.column_config.TextColumn("Date", width="small"),
+                "age_years": st.column_config.NumberColumn("Age (years)", width="small", format="%.1f"),
+                "height_cm": st.column_config.NumberColumn("Height (cm)", width="small", format="%.1f"),
+                "z_score": st.column_config.NumberColumn("Z-Score", width="small", format="%.2f"),
+                "status": st.column_config.TextColumn("Status", width="medium"),
+                "change": st.column_config.TextColumn("Change", width="large")
+            }
+        )
+        
+        # Add export button
+        csv = df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download CSV",
+            data=csv,
+            file_name=f"measurement_history_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
+        
+    except Exception as e:
+        print(f"Error in create_measurement_history_table: {e}")
+        st.error("Error creating measurement history table")
